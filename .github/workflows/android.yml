@@ -1,26 +1,52 @@
-name: Android CI
+name: Patch and Build Headwind MDM
 
 on:
-  push:
-    branches: [ "master" ]
-  pull_request:
-    branches: [ "master" ]
+  workflow_dispatch:  # Run manually from GitHub UI
 
 jobs:
-  build:
-
+  patch-build-upload:
     runs-on: ubuntu-latest
 
     steps:
-    - uses: actions/checkout@v4
-    - name: set up JDK 11
-      uses: actions/setup-java@v4
-      with:
-        java-version: '11'
-        distribution: 'temurin'
-        cache: gradle
+      - name: Checkout code
+        uses: actions/checkout@v4
 
-    - name: Grant execute permission for gradlew
-      run: chmod +x gradlew
-    - name: Build with Gradle
-      run: ./gradlew build
+      - name: Set up JDK 17 (required for AGP 8.x)
+        uses: actions/setup-java@v3
+        with:
+          distribution: 'temurin'
+          java-version: 17
+
+      - name: Create network_security_config.xml
+        run: |
+          mkdir -p launcher/src/main/res/xml
+          cat <<EOF > launcher/src/main/res/xml/network_security_config.xml
+<?xml version="1.0" encoding="utf-8"?>
+<network-security-config>
+    <base-config>
+        <trust-anchors>
+            <certificates src="system" />
+            <certificates src="user" />
+        </trust-anchors>
+    </base-config>
+</network-security-config>
+EOF
+
+      - name: Patch AndroidManifest.xml
+        run: |
+          MANIFEST="launcher/src/main/AndroidManifest.xml"
+          if ! grep -q 'networkSecurityConfig' "$MANIFEST"; then
+            sed -i '/<application / s|>| android:networkSecurityConfig="@xml/network_security_config">|' "$MANIFEST"
+          fi
+
+      - name: Grant execute permission to Gradle wrapper
+        run: chmod +x ./gradlew
+
+      - name: Build APK
+        run: ./gradlew :launcher:assembleDebug
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: HeadwindMDM-Launcher-Debug-APK
+          path: launcher/build/outputs/apk/debug/*.apk
